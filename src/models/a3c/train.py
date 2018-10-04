@@ -1,32 +1,41 @@
+# Training the AI
+
 import torch
 import torch.nn.functional as F
 from torch.autograd import Variable
-from models.a2c.A2C import A2C
+from models.a3c.A3C import A3C
 from doom.doom_trainer import DoomTrainer
 
-torch.set_default_tensor_type('torch.cuda.FloatTensor')
+
+def ensure_shared_grads(model, shared_model):
+    for param, shared_param in zip(model.parameters(), shared_model.parameters()):
+        if shared_param.grad is not None:
+            return
+        shared_param._grad = param.grad
 
 
-def train(params, trainer, model, optimizer=None):
-    trainer.set_seed(params.seed)
-    torch.manual_seed(params.seed)
+def train(rank, params, shared_model, optimizer):
+    torch.manual_seed(params.seed + rank)
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=params.lr) if optimizer is None else optimizer
-    model.train()
+    trainer = DoomTrainer(params)
+    trainer.set_seed(params.seed + rank)
+    trainer.start_game()
+
+    model = A3C(1, trainer.num_actions()).cuda()
 
     trainer.new_episode()
     state = trainer.get_screen()
+
     done = True
+    episode_length = 0
 
-    episode_length = 0 # initializing the length of an episode to 0
-    updates = 0
-
-    while updates < params.num_updates:
+    while True:
         episode_length += 1
+        model.load_state_dict(shared_model.state_dict())
 
         if done:
-            cx = Variable(torch.zeros(1, 512)).cuda()
-            hx = Variable(torch.zeros(1, 512)).cuda()
+            cx = Variable(torch.zeros(1, 256)).cuda()
+            hx = Variable(torch.zeros(1, 256)).cuda()
         else:
             cx = Variable(cx.data).cuda()
             hx = Variable(hx.data).cuda()
@@ -40,11 +49,15 @@ def train(params, trainer, model, optimizer=None):
             value, action_values, (hx, cx) = model((Variable(state.unsqueeze(0)).cuda(), (hx, cx)))
             prob = F.softmax(action_values)
             log_prob = F.log_softmax(action_values)
+
             entropy = -(log_prob * prob).sum(1)
             entropies.append(entropy)
 
             action = prob.multinomial().data
             log_prob = log_prob.gather(1, Variable(action))
+
+            values.append(value)
+            log_probs.append(log_prob)
 
             reward, is_done = trainer.make_action(action[0][0])
             done = is_done or episode_length >= params.max_episode_length
@@ -54,8 +67,6 @@ def train(params, trainer, model, optimizer=None):
                 episode_length = 0
                 trainer.new_episode()
 
-            values.append(value)
-            log_probs.append(log_prob)
             state = trainer.get_screen()
             rewards.append(reward)
 
@@ -79,14 +90,14 @@ def train(params, trainer, model, optimizer=None):
             advantage = R - values[i]
 
             value_loss = value_loss + 0.5 * advantage.pow(2)
-            td = rewards[i] + params.gamma * values[i + 1].data - values[i].data
-            gae = gae * params.gamma * params.tau + td
+            TD = rewards[i] + params.gamma * values[i + 1].data - values[i].data
+            gae = gae * params.gamma * params.tau + TD
             policy_loss = policy_loss - log_probs[i] * Variable(gae) - 0.01 * entropies[i]
 
         optimizer.zero_grad()
         (policy_loss + 0.5 * value_loss).backward()
 
         torch.nn.utils.clip_grad_norm(model.parameters(), 40)
+        ensure_shared_grads(model, shared_model)
 
         optimizer.step()
-        updates += 1

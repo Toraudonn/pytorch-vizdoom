@@ -39,7 +39,7 @@ class A2C(torch.nn.Module):
         self.conv4 = nn.Conv2d(64, 64, 2, stride=2, padding=1)
 
         self.lstm_size = 512
-        self.lstm = nn.LSTMCell(10752, self.lstm_size)
+        self.lstm = nn.LSTMCell(81344, self.lstm_size)
 
         num_outputs = num_actions # getting the number of possible actions
         self.critic_linear = nn.Linear(self.lstm_size, 1) # full connection of the critic: output = V(S)

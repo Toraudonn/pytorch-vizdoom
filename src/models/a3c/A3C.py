@@ -3,12 +3,14 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-torch.set_default_tensor_type('torch.cuda.FloatTensor')
+# torch.set_default_tensor_type('torch.cuda.FloatTensor')
+
 
 def normalized_columns_initializer(weights, std=1.0):
     out = torch.randn(weights.size())
     out *= std / torch.sqrt(out.pow(2).sum(1, True).expand_as(out))
     return out
+
 
 def init_weights(m):
     class_name = m.__class__.__name__
@@ -27,6 +29,7 @@ def init_weights(m):
         m.weight.data.uniform_(-w_bound, w_bound)
         m.bias.data.fill_(0)
 
+
 class A3C(torch.nn.Module):
     def __init__(self, num_inputs, num_actions):
         super(A3C, self).__init__()
@@ -44,12 +47,10 @@ class A3C(torch.nn.Module):
 
         self.apply(init_weights)
 
-        self.actor_linear.weight.data = normalized_columns_initializer
-                                        (self.actor_linear.weight.data, 0.01)
+        self.actor_linear.weight.data = normalized_columns_initializer(self.actor_linear.weight.data, 0.01)
         self.actor_linear.bias.data.fill_(0)
 
-        self.critic_linear.weight.data = normalized_columns_initializer
-                                         (self.critic_linear.weight.data, 1.0)
+        self.critic_linear.weight.data = normalized_columns_initializer(self.critic_linear.weight.data, 1.0)
         self.critic_linear.bias.data.fill_(0)
 
         self.lstm.bias_ih.data.fill_(0)
