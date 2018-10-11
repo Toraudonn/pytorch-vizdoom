@@ -1,6 +1,5 @@
-import os
 import torch
-import torch.multiprocessing as _mp
+import torch.multiprocessing as mp
 
 from models.a2c.A2C import A2C
 from models.a2c.test import test as test_a2c
@@ -21,14 +20,8 @@ from models.dqn.train import eligibility_trace
 
 from doom.doom_trainer import DoomTrainer
 
-mp = _mp.get_context('spawn')
-
 
 def play(parameters):
-    dtype = torch.cuda.FloatTensor
-    torch.manual_seed(parameters.seed)
-    torch.set_default_tensor_type('torch.cuda.FloatTensor')
-
     if parameters.model == 'human':
         play_human(parameters)
     elif parameters.model == 'a3c':
@@ -48,7 +41,7 @@ def play_human(params):
 def play_a2c(params):
     trainer = DoomTrainer(params)
     trainer.start_game()
-    model = A2C(1, len(trainer.actions)).cuda()
+    model = A2C(1, len(trainer.actions))
     optimizer = torch.optim.Adam(model.parameters(), lr=params.lr)
 
     counter = 0
@@ -62,10 +55,28 @@ def play_a2c(params):
 
 
 def play_a3c(params):
+    torch.manual_seed(params.seed)
+    if params.gpu_ids == -1:
+        params.gpu_ids = [-1]
+    else:
+        torch.cuda.manual_seed(params.seed)
+        mp.set_start_method('spawn')
+
+    torch.cuda.manual_seed(params.seed)
+
     trainer = DoomTrainer(params)
-    os.environ['OMP_NUM_THREADS'] = '1'
-    shared_model = A3C(1, trainer.num_actions())
-    shared_model.share_memory()
+
+    # initialize shared model
+    model_name = "save/" + "a3c"  # use this to save model
+    shared_model = A3C(1, len(trainer.actions)).cpu()  # cannot pickle this?
+    # why is this a cuda storage and not a cuda tensor
+    # works when .cpu() is passed
+    if params.load:
+        saved_state = torch.load(
+            '{}.dat'.format(model_name),
+            map_location=lambda storage, loc: storage)
+        shared_model.load_state_dict(saved_state)
+    shared_model.share_memory() 
 
     optimizer = optimizers.SharedAdam(shared_model.parameters(), lr=params.lr)
     optimizer.share_memory()

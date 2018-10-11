@@ -9,17 +9,16 @@ from doom.doom_trainer import DoomTrainer
 from utils.logger import log_reward
 
 
-torch.set_default_tensor_type('torch.cuda.FloatTensor')
 
+def test(rank, args, shared_model):
+    torch.manual_seed(args.seed + rank)
 
-def test(rank, params, shared_model):
-    torch.manual_seed(params.seed + rank)
-
-    trainer = DoomTrainer(params)
-    trainer.set_seed(params.seed + rank)
+    trainer = DoomTrainer(args)
+    trainer.set_seed(args.seed + rank)
     trainer.start_game()
 
-    model = A3C(1, trainer.num_actions()).cuda()
+    print("ho")
+    model = A3C(1, trainer.num_actions())
     model.eval()
 
     trainer.new_episode()
@@ -59,5 +58,6 @@ def test(rank, params, shared_model):
             episode_length = 0
             actions.clear()
             trainer.new_episode()
-            time.sleep(15)
+
+            time.sleep(5)
         state = trainer.get_screen()

@@ -1,5 +1,3 @@
-# Training the AI
-
 import torch
 import torch.nn.functional as F
 from torch.autograd import Variable
@@ -14,14 +12,24 @@ def ensure_shared_grads(model, shared_model):
         shared_param._grad = param.grad
 
 
-def train(rank, params, shared_model, optimizer):
-    torch.manual_seed(params.seed + rank)
+def train(rank, args, shared_model, optimizer):
+    
+    # separate gpu ids
+    gpu_id = args.gpu_ids[rank % len(args.gpu_ids)]
 
-    trainer = DoomTrainer(params)
-    trainer.set_seed(params.seed + rank)
+    torch.manual_seed(args.seed + rank)
+    if gpu_id >= 0:
+        torch.cuda.manual_seed(args.seed + rank)
+    
+    trainer = DoomTrainer(args)
+    trainer.set_seed(args.seed + rank)
     trainer.start_game()
 
-    model = A3C(1, trainer.num_actions()).cuda()
+    print("hello")
+    model = A3C(1, trainer.num_actions())
+    if gpu_id >= 0:
+        with torch.cuda.device(gpu_id):
+            model = model.cuda()
 
     trainer.new_episode()
     state = trainer.get_screen()
@@ -45,7 +53,7 @@ def train(rank, params, shared_model, optimizer):
         rewards = []
         entropies = []
 
-        for step in range(params.num_steps):
+        for step in range(args.num_steps):
             value, action_values, (hx, cx) = model((Variable(state.unsqueeze(0)).cuda(), (hx, cx)))
             prob = F.softmax(action_values)
             log_prob = F.log_softmax(action_values)
@@ -60,7 +68,7 @@ def train(rank, params, shared_model, optimizer):
             log_probs.append(log_prob)
 
             reward, is_done = trainer.make_action(action[0][0])
-            done = is_done or episode_length >= params.max_episode_length
+            done = is_done or episode_length >= args.max_episode_length
             reward = max(min(reward, 1), -1)
 
             if done:
@@ -86,12 +94,12 @@ def train(rank, params, shared_model, optimizer):
         gae = torch.zeros(1, 1)
 
         for i in reversed(range(len(rewards))):
-            R = params.gamma * R + rewards[i]
+            R = args.gamma * R + rewards[i]
             advantage = R - values[i]
 
             value_loss = value_loss + 0.5 * advantage.pow(2)
-            TD = rewards[i] + params.gamma * values[i + 1].data - values[i].data
-            gae = gae * params.gamma * params.tau + TD
+            TD = rewards[i] + args.gamma * values[i + 1].data - values[i].data
+            gae = gae * args.gamma * args.tau + TD
             policy_loss = policy_loss - log_probs[i] * Variable(gae) - 0.01 * entropies[i]
 
         optimizer.zero_grad()
